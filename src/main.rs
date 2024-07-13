@@ -13,7 +13,8 @@ async fn main() {
         x.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         ""
     });
-    let main = warp::path("").map(move || x1.load(std::sync::atomic::Ordering::Relaxed).to_string());
+    let main =
+        warp::path::end().map(move || x1.load(std::sync::atomic::Ordering::Relaxed).to_string());
     warp::serve(main.or(add))
         .run(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080))
         .await;
