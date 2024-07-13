@@ -1,2 +1,2 @@
-git pull
+git pull origin main
 cargo run
