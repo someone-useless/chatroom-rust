@@ -6,7 +6,10 @@ use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use tokio::sync::Mutex;
 use warp::filters::ws::{self, WebSocket};
 
-use crate::{game::Game, player::Player};
+use crate::{
+    game::Game,
+    player::Player,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct Server {
@@ -36,6 +39,10 @@ impl Server {
         };
         games.insert(game_code.clone(), Game::new(remover));
         game_code
+    }
+
+    pub async fn is_game_exist(&self, game_code: &str) -> bool {
+        self.games.lock().await.contains_key(game_code)
     }
 
     pub async fn destroy_game(self, game_code: String) {
