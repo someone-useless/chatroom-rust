@@ -27,7 +27,7 @@ impl Server {
         while games.contains_key(&game_code) {
             game_code = thread_rng()
                 .sample_iter(&Alphanumeric)
-                .take(4)
+                .take(3)
                 .map(|c| c as char)
                 .collect::<String>();
         }
