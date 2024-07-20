@@ -27,7 +27,7 @@ async fn main() {
                 let server = server.clone();
                 async move {
                     let game_code = server.new_game().await;
-                    Ok::<_, Infallible>(game_code)
+                    Ok::<_, Infallible>(json!({ "game_code": game_code }).to_string())
                 }
             }
         })
