@@ -51,15 +51,14 @@ async fn main() {
 
     let join_game = warp::path("game")
         .and(warp::path::param())
-        .and(warp::header("Player-Name"))
         .and(warp::ws())
         .map({
             let server = server.clone();
-            move |game_code: String, player_name: String, ws: Ws| {
+            move |game_code: String, ws: Ws| {
                 let server = server.clone();
                 ws.on_upgrade(|socket| async move {
                     let _ = server
-                        .add_player_to_game(socket, player_name, &game_code)
+                        .add_player_to_game(socket, &game_code)
                         .await;
                 })
             }

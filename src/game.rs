@@ -23,12 +23,10 @@ pub enum ExternalMessage {
 #[derive(Debug)]
 pub struct Game {
     _handle: JoinHandle<()>,
-    pub message_sender: MpscSender<ExternalMessage>,
     pub action_sender: MpscSender<(PlayerAction, usize)>,
 }
 
 enum Message {
-    External(ExternalMessage),
     Internal(PlayerAction, usize),
     CheckAlive,
 }
@@ -38,13 +36,11 @@ impl Game {
     where
         F: Future<Output = ()> + Send,
     {
-        let (message_sender, message_receiver) = tokio::sync::mpsc::channel(3);
         let (action_sender, action_receiver) = tokio::sync::mpsc::channel(3);
         let handle = tokio::spawn(async move {
             let mut data = GameData::default();
             let game_func = || async {
                 let mut message_stream = stream_select!(
-                    ReceiverStream::new(message_receiver).map(|msg| Message::External(msg)),
                     ReceiverStream::new(action_receiver)
                         .map(|(msg, id)| Message::Internal(msg, id)),
                     IntervalStream::new(interval_at(
@@ -67,7 +63,6 @@ impl Game {
         });
         Self {
             _handle: handle,
-            message_sender,
             action_sender,
         }
     }
@@ -83,7 +78,10 @@ impl Game {
                         return Err(anyhow!("Game Not Alive"));
                     };
                 }
-                Message::External(ExternalMessage::NewPlayer(new_player)) => {
+                Message::Internal(PlayerAction::Join { .. }, _ ) => {
+                    return Err(anyhow!("Join Action should not be sent"));
+                }
+                Message::Internal(PlayerAction::JoinWithPlayer { player: new_player, name }, _) => {
                     let id = *data
                         .players
                         .last_key_value()
@@ -93,7 +91,7 @@ impl Game {
                     for player in data.all_players() {
                         player
                             .send(PlayerMessage::NewPlayer {
-                                name: new_player.name.clone(),
+                                name: name.clone(),
                             })
                             .await?;
                     }
@@ -101,15 +99,14 @@ impl Game {
                     new_player
                         .send(PlayerMessage::Joined {
                             players_name: data
-                                .all_players()
-                                .map(|player| player.name.clone())
+                                .all_players_name()
                                 .collect(),
                         })
                         .await?;
                     if data.players.is_empty() {
                         new_player.send(PlayerMessage::HostStart).await?;
                     }
-                    data.players.insert(id, new_player);
+                    data.players.insert(id, (new_player, name));
                 }
                 Message::Internal(PlayerAction::Start, id) => {
                     if data.players.len() > 1 {
@@ -130,10 +127,10 @@ impl Game {
     async fn start(data: &mut GameData) -> Result<InGameData> {
         let mut game_data = InGameData::new();
 
-        for (id, player) in data.players.iter() {
+        for (id, player) in data.all_players_and_ids() {
             game_data
                 .player_state
-                .insert(*id, PlayerState { point: 10 });
+                .insert(id, PlayerState { point: 10 });
 
             player.send(PlayerMessage::Start { point: 10 }).await?;
         }
@@ -175,7 +172,10 @@ impl Game {
             while let Some(message) = message_stream.next().await {
                 match message {
                     Message::CheckAlive => (),
-                    Message::External(ExternalMessage::NewPlayer(player)) => {
+                    Message::Internal(PlayerAction::Join { .. }, _) => {
+                        return Err(anyhow!("Join Action should not be sent"));
+                    }
+                    Message::Internal(PlayerAction::JoinWithPlayer { player, .. }, _) => {
                         player.send(PlayerMessage::GameStarted).await?;
                     }
                     Message::Internal(PlayerAction::Start, id) => {
@@ -284,26 +284,25 @@ impl Game {
 
 #[derive(Debug, Default)]
 struct GameData {
-    players: BTreeMap<usize, Player>,
+    players: BTreeMap<usize, (Player, Arc<str>)>,
 }
 
 impl GameData {
     fn all_players(&self) -> impl Iterator<Item = &Player> {
-        self.players.values()
+        self.players.values().map(|(player, _)| player)
+    }
+
+    fn all_players_name(&self) -> impl Iterator<Item = Arc<str>> + '_ {
+        self.players.values().map(|(_, name)| name.clone())
     }
 
     fn all_players_and_ids(&self) -> impl Iterator<Item = (usize, &Player)> {
-        self.players.iter().map(|(id, player)| (*id, player))
+        self.players.iter().map(|(id, (player, _))| (*id, player))
     }
 
     #[inline]
     fn get_player(&self, id: &usize) -> Option<&Player> {
-        self.players.get(id)
-    }
-
-    #[inline]
-    fn get_player_name(&self, id: &usize) -> Option<Arc<str>> {
-        self.get_player(id).map(|player| player.name.clone())
+        self.players.get(id).map(|(player, _)| player)
     }
 
     #[inline]
@@ -312,6 +311,10 @@ impl GameData {
             .get_player(id)
             .ok_or_else(|| anyhow!("Player not found"))?;
         player.send(msg).await
+    }
+
+    fn get_player_name(&self, id: &usize) -> Option<Arc<str>> {
+        self.players.get(id).map(|(_, name)| name).cloned()
     }
 }
 

@@ -53,7 +53,6 @@ impl Server {
     pub async fn add_player_to_game(
         &self,
         mut player_socket: WebSocket,
-        player_name: impl Into<Arc<str>>,
         game_code: &str,
     ) -> Result<()> {
         let mut games = self.games.lock().await;
@@ -71,15 +70,13 @@ impl Server {
             return Err(anyhow!("Game Not Found"));
         };
         let (message_sender, message_recviver) = tokio::sync::mpsc::channel(3);
-        let handle = tokio::spawn(crate::player::handle_one_player(
+        let new_player = Player::new(message_sender);
+        tokio::spawn(crate::player::handle_one_player(
+            new_player,
             player_socket,
             game.action_sender.clone(),
             message_recviver,
         ));
-        let new_player = Player::new(handle, message_sender, player_name.into());
-        game.message_sender
-            .send(crate::game::ExternalMessage::NewPlayer(new_player))
-            .await?;
         Ok(())
     }
 }

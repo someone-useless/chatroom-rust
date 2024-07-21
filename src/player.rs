@@ -3,10 +3,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use futures::{stream_select, SinkExt, StreamExt as _};
 use serde::{Deserialize, Serialize};
-use tokio::{
-    sync::mpsc::{Receiver as MpscReceiver, Sender as MpscSender},
-    task::JoinHandle,
-};
+use tokio::sync::mpsc::{Receiver as MpscReceiver, Sender as MpscSender};
 use tokio_stream::wrappers::ReceiverStream;
 use warp::filters::ws::{self, WebSocket};
 
@@ -55,6 +52,14 @@ pub enum PlayerMessage {
 pub enum PlayerAction {
     #[serde(skip)]
     Error(anyhow::Error),
+    #[serde(skip)]
+    JoinWithPlayer {
+        player: Player,
+        name: Arc<str>,
+    },
+    Join {
+        name: Arc<str>,
+    },
     Start,
     UseCard {
         card_index: usize,
@@ -62,23 +67,15 @@ pub enum PlayerAction {
     Quit,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Player {
-    _handle: JoinHandle<()>,
     message_sender: MpscSender<PlayerMessage>,
-    pub name: Arc<str>,
 }
 
 impl Player {
-    pub fn new(
-        handle: JoinHandle<()>,
-        message_sender: MpscSender<PlayerMessage>,
-        name: Arc<str>,
-    ) -> Self {
+    pub fn new(message_sender: MpscSender<PlayerMessage>) -> Self {
         Self {
-            _handle: handle,
             message_sender,
-            name,
         }
     }
 
@@ -93,6 +90,7 @@ enum Message {
 }
 
 pub async fn handle_one_player(
+    player: Player,
     ws: WebSocket,
     action_sender: MpscSender<(PlayerAction, usize)>,
     message_receiver: MpscReceiver<PlayerMessage>,
@@ -148,10 +146,12 @@ pub async fn handle_one_player(
                 if let Err(_) = player_action {
                     continue;
                 }
-                let player_action = player_action.unwrap();
-
+                let mut player_action = player_action.unwrap();
+                if let PlayerAction::Join { name } = player_action {
+                    player_action = PlayerAction::JoinWithPlayer { player: player.clone(), name };
+                }
                 action_sender
-                    .send((player_action, id.unwrap()))
+                    .send((player_action, id.unwrap_or(0)))
                     .await
                     .expect("Should successfully send");
             }
