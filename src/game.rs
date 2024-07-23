@@ -32,7 +32,7 @@ enum Message {
 }
 
 impl Game {
-    pub fn new<F>(remover: impl FnOnce() -> F + Send + 'static) -> Self
+    pub fn new<F>(game_code: String, remover: impl FnOnce() -> F + Send + 'static) -> Self
     where
         F: Future<Output = ()> + Send,
     {
@@ -75,7 +75,7 @@ impl Game {
             match message {
                 Message::CheckAlive => {
                     if data.players.is_empty() {
-                        return Err(anyhow!("Game Not Alive"));
+                        return Err(anyhow!("Game Not Alive: {}", data.code()));
                     };
                 }
                 Message::Internal(PlayerAction::Join { .. }, _ ) => {
@@ -117,6 +117,9 @@ impl Game {
                 }
                 Message::Internal(PlayerAction::Quit, id) => {
                     data.players.remove(&id);
+                    if data.players.is_empty() {
+                       return Err(anyhow!("Player all quit: {}", data.code()));
+                    }
                 }
                 _ => (),
             }
@@ -210,6 +213,11 @@ impl Game {
                     Message::Internal(PlayerAction::Quit, id) => {
                         player_data.players.remove(&id);
                         game_data.player_state.remove(&id);
+                        if !player_data.players.is_empty() && game_data.player_state.is_empty() {
+                            break;
+                        } else if player_data.players.is_empty() {
+                            return Err(anyhow!("All player quit"));
+                        }
                     }
                     _ => (),
                 }
@@ -285,9 +293,14 @@ impl Game {
 #[derive(Debug, Default)]
 struct GameData {
     players: BTreeMap<usize, (Player, Arc<str>)>,
+    code: String,
 }
 
 impl GameData {
+    fn code(&self) -> &str {
+        &self.code
+    }
+
     fn all_players(&self) -> impl Iterator<Item = &Player> {
         self.players.values().map(|(player, _)| player)
     }

@@ -37,7 +37,7 @@ impl Server {
             let server = server;
             server.destroy_game(game_code_removing)
         };
-        games.insert(game_code.clone(), Game::new(remover));
+        games.insert(game_code.clone(), Game::new(game_code.clone(), remover));
         game_code
     }
 
