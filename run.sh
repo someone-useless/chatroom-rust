@@ -1,2 +1,2 @@
 git pull origin main
-cargo run
+cargo run --release
