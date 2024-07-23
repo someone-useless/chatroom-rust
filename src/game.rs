@@ -38,7 +38,7 @@ impl Game {
     {
         let (action_sender, action_receiver) = tokio::sync::mpsc::channel(3);
         let handle = tokio::spawn(async move {
-            let mut data = GameData::default();
+            let mut data = GameData::new(game_code);
             let game_func = || async {
                 let mut message_stream = stream_select!(
                     ReceiverStream::new(action_receiver)
@@ -290,13 +290,20 @@ impl Game {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct GameData {
     players: BTreeMap<usize, (Player, Arc<str>)>,
     code: String,
 }
 
 impl GameData {
+    fn new(code: String) -> Self {
+        Self {
+            players: BTreeMap::new(),
+            code,
+        }
+    }
+
     fn code(&self) -> &str {
         &self.code
     }
