@@ -1,9 +1,9 @@
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, sync::{Arc, LazyLock}, time::Duration};
 
 use futures::{stream_select, Future, Stream, StreamExt};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use tokio::{
-    sync::mpsc::Sender as MpscSender,
+    sync::{mpsc::Sender as MpscSender, Mutex},
     task::JoinHandle,
     time::{interval_at, Instant},
 };
@@ -15,6 +15,8 @@ use crate::{
 };
 
 use anyhow::{anyhow, Result};
+
+static RNG: LazyLock<Mutex<StdRng>> = LazyLock::new(|| Mutex::new(StdRng::from_entropy()));
 
 pub enum ExternalMessage {
     NewPlayer(Player),
@@ -148,10 +150,10 @@ impl Game {
         let mut playing_id = *game_data
             .player_state
             .keys()
-            .nth(game_data.rng.gen_range(0..game_data.player_state.len()))
+            .nth(RNG.lock().await.gen_range(0..game_data.player_state.len()))
             .unwrap();
         while !game_data.game_ended() {
-            let cards = game_data.gen_cards();
+            let cards = game_data.gen_cards().await;
             let playing_player_name = player_data
                 .get_player_name(&playing_id)
                 .ok_or_else(|| anyhow!("Should be in player_data"))?;
@@ -297,6 +299,7 @@ struct GameData {
 }
 
 impl GameData {
+    #[inline]
     fn new(code: String) -> Self {
         Self {
             players: BTreeMap::new(),
@@ -304,14 +307,17 @@ impl GameData {
         }
     }
 
+    #[inline]
     fn code(&self) -> &str {
         &self.code
     }
 
+    #[inline]
     fn all_players(&self) -> impl Iterator<Item = &Player> {
         self.players.values().map(|(player, _)| player)
     }
 
+    #[inline]
     fn all_players_name(&self) -> impl Iterator<Item = Arc<str>> + '_ {
         self.players.values().map(|(_, name)| name.clone())
     }
@@ -333,6 +339,7 @@ impl GameData {
         player.send(msg).await
     }
 
+    #[inline]
     fn get_player_name(&self, id: &usize) -> Option<Arc<str>> {
         self.players.get(id).map(|(_, name)| name).cloned()
     }
@@ -340,8 +347,6 @@ impl GameData {
 
 struct InGameData {
     player_state: BTreeMap<usize, PlayerState>,
-    rng: StdRng,
-    card_distribution: CardDistribution,
     stack: Stack,
 }
 
@@ -350,15 +355,13 @@ impl InGameData {
     fn new() -> Self {
         Self {
             player_state: BTreeMap::new(),
-            rng: StdRng::from_entropy(),
-            card_distribution: CardDistribution::default(),
             stack: Stack::new(10),
         }
     }
 
     #[inline]
     fn game_ended(&self) -> bool {
-        self.player_state.len() > 1
+        self.player_state.len() <= 1
     }
 
     #[inline]
@@ -378,9 +381,12 @@ impl InGameData {
     }
 
     #[inline]
-    fn gen_cards(&mut self) -> Vec<Card> {
+    async fn gen_cards(&mut self) -> Vec<Card> {
+        static CARD_DISTRIBUTION: LazyLock<CardDistribution> = LazyLock::new(CardDistribution::default);
+
+        let mut rng = RNG.lock().await;
         (0..3)
-            .map(|_| self.rng.sample(&self.card_distribution))
+            .map(|_| rng.sample(LazyLock::force(&CARD_DISTRIBUTION)))
             .collect()
     }
 }
